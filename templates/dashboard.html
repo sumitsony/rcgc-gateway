@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <title>Elint AI Services | RCGC Control Plane</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-8 font-sans">
+
+    <div class="max-w-6xl mx-auto mb-8 flex justify-between items-end border-b border-gray-700 pb-4">
+        <div>
+            <div class="text-sm text-emerald-500 font-semibold tracking-wider uppercase mb-1">Elint AI Services</div>
+            <h1 class="text-3xl font-bold tracking-tight">RCGC Gateway</h1>
+            <p class="text-gray-400 mt-1">Routing, Caching, Guardrails & Cost Tracking</p>
+        </div>
+        <div class="text-sm text-gray-500">
+            v0.1.2 • <span class="text-green-400 animate-pulse">● Live</span>
+        </div>
+    </div>
+
+    <div class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+
+        <div class="md:col-span-1 space-y-6">
+            <div class="bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-700">
+                <h2 class="text-lg font-semibold text-gray-300 mb-4">Token Flow</h2>
+                <div hx-get="/admin/ui/tokens" hx-trigger="load, every 2s" hx-swap="innerHTML">
+                    <div class="text-gray-500 animate-pulse text-sm">Loading stats...</div>
+                </div>
+            </div>
+
+            <div class="bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-700">
+                <h2 class="text-lg font-semibold text-gray-300 mb-4">Provider Load</h2>
+                <div hx-get="/admin/ui/providers" hx-trigger="load, every 2s" hx-swap="innerHTML">
+                    <div class="text-gray-500 animate-pulse text-sm">Loading providers...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="md:col-span-2">
+            <div class="bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-700 h-full">
+                <h2 class="text-lg font-semibold text-gray-300 mb-4">Recent Activity</h2>
+                <div hx-get="/admin/ui/logs" hx-trigger="load, every 2s" hx-swap="innerHTML">
+                    <div class="text-gray-500 animate-pulse text-sm">Loading logs...</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</body>
+</html>

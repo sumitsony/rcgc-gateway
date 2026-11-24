@@ -88,7 +88,13 @@ We strictly adhere to the four principles:
 
 \- \[x] \*\*Live Smoke Test:\*\* Groq and Ollama verified live. Gemini verified as reachable but currently returning 503 (documented in ADR-010).
 
-\- \[ ] \*\*NEXT UP (v0.2.1):\*\* Expose `cost\_usd` in `/usage` endpoint (ADR-011).
+\- \[x] \*\*v0.1.1 COMPLETE:\*\* Token-first audit log, cost observability, and `/admin/stats` \& `/admin/logs` endpoints.
+
+\- \[x] \*\*v0.1.2 COMPLETE:\*\* Read-only HTMX dashboard with live polling for tokens, provider split, and activity logs. "Elint AI Services" branding added.
+
+\- \[ ] \*\*NEXT UP (v0.1.3):\*\* Interactive Chat Playground \& Attack Simulator. 
+
+&#x20; - \*Decision:\* Created as a separate `/playground` page with a custom UI endpoint (`/admin/ui/test-chat`) to render HTML traces instead of raw JSON.
 
 \- \[ ] \*\*DECISION REQUIRED:\*\* Docker for Redis (v0.2.2) - Yes or No?
 

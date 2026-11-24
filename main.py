@@ -3,9 +3,11 @@ import os
 import time
 import hashlib
 import json
+import pathlib
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 
@@ -37,7 +39,7 @@ async def lifespan(app: FastAPI):
     guardrails.warm_up()
     yield
 
-app = FastAPI(title="RCGC Gateway v0.1", lifespan=lifespan)
+app = FastAPI(title="Elint AI Services | RCGC Gateway v0.1", lifespan=lifespan)
 
 # --- Pydantic Models ---
 class Message(BaseModel):
@@ -100,13 +102,11 @@ async def chat_completions(
             print("--- CACHE HIT ---")
             response = cached_entry["response"]
             
-            # Extract tokens from cached response
             usage = response.get("usage", {})
             prompt_tokens = usage.get("prompt_tokens", 0)
             completion_tokens = usage.get("completion_tokens", 0)
             total_tokens = prompt_tokens + completion_tokens
             
-            # Log cache hit (0 cost, but tokens still counted for user consumption)
             add_audit_log({
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "key": key,
@@ -144,7 +144,6 @@ async def chat_completions(
     except Exception as e:
         print(f"Primary provider failed: {e}. Falling back...")
         
-        # Log failure of primary provider
         add_audit_log({
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "key": key,
@@ -153,7 +152,7 @@ async def chat_completions(
             "pii_masked": pii_masked,
             "tokens": {"prompt": 0, "completion": 0, "total": 0},
             "cost_usd": 0.0,
-            "status": f"failed: {str(e)[:50]}" # Truncate error for UI
+            "status": f"failed: {str(e)[:50]}"
         })
 
         if force_provider != "gemini":
@@ -195,11 +194,9 @@ async def chat_completions(
     pricing = PRICING.get(provider_used, {"input": 0, "output": 0})
     cost = (prompt_tokens * pricing["input"] + completion_tokens * pricing["output"]) / 1_000_000
     
-    # Update Global Key Usage
     KEYS[key]["tokens_used"] += total_tokens
     KEYS[key]["cost_usd"] += cost
 
-    # Add to Audit Log
     add_audit_log({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "key": key,
@@ -233,11 +230,10 @@ def get_usage(authorization: Optional[str] = Header(None)):
         "cost_usd": round(KEYS[key]["cost_usd"], 6)
     }
 
-# --- Admin Endpoints for UI (v0.1.2) ---
+# --- Admin Endpoints (JSON) ---
 
 @app.get("/admin/stats")
 def get_admin_stats():
-    """Aggregates token and cost flow for the dashboard."""
     total_tokens = 0
     total_cost = 0.0
     provider_split = {
@@ -268,5 +264,109 @@ def get_admin_stats():
 
 @app.get("/admin/logs")
 def get_admin_logs():
-    """Returns the audit log, most recent first."""
     return list(reversed(AUDIT_LOG))
+
+
+# --- UI Endpoints for HTMX (v0.1.2) ---
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def get_dashboard():
+    """Serves the static HTMX dashboard UI."""
+    html_path = pathlib.Path(__file__).parent / "templates" / "dashboard.html"
+    return html_path.read_text(encoding="utf-8")
+
+@app.get("/admin/ui/tokens", response_class=HTMLResponse)
+def get_ui_tokens():
+    total_tokens = sum(e["tokens"]["total"] for e in AUDIT_LOG if e["status"] == "success")
+    total_cost = sum(e["cost_usd"] for e in AUDIT_LOG if e["status"] == "success")
+    return f"""
+    <div class="space-y-4">
+        <div>
+            <div class="text-sm text-gray-400">Total Tokens Processed</div>
+            <div class="text-3xl font-mono text-white">{total_tokens:,}</div>
+        </div>
+        <div>
+            <div class="text-sm text-gray-400">Shadow Cost (USD)</div>
+            <div class="text-xl font-mono text-emerald-400">${total_cost:.6f}</div>
+        </div>
+    </div>
+    """
+
+@app.get("/admin/ui/providers", response_class=HTMLResponse)
+def get_ui_providers():
+    provider_split = {}
+    total_tokens = 0
+    for e in AUDIT_LOG:
+        if e["status"] == "success":
+            p = e["provider_used"]
+            t = e["tokens"]["total"]
+            provider_split[p] = provider_split.get(p, 0) + t
+            total_tokens += t
+    
+    if total_tokens == 0:
+        return "<div class='text-sm text-gray-500'>No traffic yet.</div>"
+
+    html = "<div class='space-y-3'>"
+    for name, tokens in provider_split.items():
+        pct = (tokens / total_tokens) * 100
+        color = {"groq": "bg-blue-500", "gemini": "bg-purple-500", "ollama": "bg-orange-500", "cache": "bg-emerald-500"}.get(name, "bg-gray-500")
+        html += f"""
+        <div>
+            <div class="flex justify-between text-xs mb-1">
+                <span class="uppercase font-semibold text-gray-300">{name}</span>
+                <span class="text-gray-400">{tokens} tokens</span>
+            </div>
+            <div class="w-full bg-gray-700 rounded-full h-2">
+                <div class="{color} h-2 rounded-full" style="width: {pct}%"></div>
+            </div>
+        </div>
+        """
+    html += "</div>"
+    return html
+
+@app.get("/admin/ui/logs", response_class=HTMLResponse)
+def get_ui_logs():
+    if not AUDIT_LOG:
+        return "<div class='text-sm text-gray-500'>No activity yet.</div>"
+    
+    rows = ""
+    for entry in reversed(AUDIT_LOG[-20:]):
+        ts = entry["timestamp"].split("T")[1][:8]
+        provider = entry["provider_used"]
+        cache = "✅" if entry["cache_hit"] else "❌"
+        pii = "🛡️" if entry["pii_masked"] else "-"
+        tokens = entry["tokens"]["total"]
+        cost = entry["cost_usd"]
+        status = entry["status"]
+        status_color = "text-green-400" if status == "success" else "text-red-400"
+        
+        rows += f"""
+        <tr class="border-b border-gray-700 text-sm">
+            <td class="py-2 text-gray-400 font-mono">{ts}</td>
+            <td class="py-2 text-gray-300 uppercase text-xs">{provider}</td>
+            <td class="py-2 text-center">{cache}</td>
+            <td class="py-2 text-center">{pii}</td>
+            <td class="py-2 text-right font-mono">{tokens}</td>
+            <td class="py-2 text-right font-mono text-emerald-400">${cost:.6f}</td>
+            <td class="py-2 text-right text-xs {status_color}">{status[:20]}</td>
+        </tr>
+        """
+        
+    return f"""
+    <div class="overflow-y-auto max-h-96">
+        <table class="w-full text-left">
+            <thead class="sticky top-0 bg-gray-800 text-xs text-gray-500 uppercase">
+                <tr>
+                    <th class="pb-2">Time</th>
+                    <th class="pb-2">Provider</th>
+                    <th class="pb-2 text-center">Cache</th>
+                    <th class="pb-2 text-center">PII</th>
+                    <th class="pb-2 text-right">Tokens</th>
+                    <th class="pb-2 text-right">Cost</th>
+                    <th class="pb-2 text-right">Status</th>
+                </tr>
+            </thead>
+            <tbody>{rows}</tbody>
+        </table>
+    </div>
+    """
