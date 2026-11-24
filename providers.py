@@ -2,86 +2,57 @@
 import httpx
 import os
 
-# We use a standard timeout for all providers
-TIMEOUT = 10.0
+TIMEOUT = 30.0
+
+# ADR-003 (revised): All providers use the OpenAI-compatible chat completions endpoint.
+# Gemini, Groq, and Ollama all expose this format, so we can use a single
+# request/response shape. The only differences are base URL and model name.
+
+PROVIDER_CONFIG = {
+    "groq": {
+        "base_url": "https://api.groq.com/openai/v1/chat/completions",
+        "api_key_env": "GROQ_API_KEY",
+        "default_model": "openai/gpt-oss-120b",
+    },
+    "gemini": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "api_key_env": "GEMINI_API_KEY",
+        "default_model": "gemini-3.8-flash",
+    },
+    "ollama": {
+        "base_url": "http://localhost:11434/v1/chat/completions",
+        "api_key_env": None,
+        "default_model": "llama3.2",
+    },
+}
+
+async def _call_openai_compatible(provider: str, payload: dict) -> dict:
+    cfg = PROVIDER_CONFIG[provider]
+
+    # Set the model if the client didn't specify one (or used "default")
+    if payload.get("model") in (None, "default"):
+        payload["model"] = cfg["default_model"]
+
+    headers = {"Content-Type": "application/json"}
+    if cfg["api_key_env"]:
+        key = os.getenv(cfg["api_key_env"])
+        if not key:
+            raise ValueError(f"Missing {cfg['api_key_env']} for provider '{provider}'")
+        headers["Authorization"] = f"Bearer {key}"
+    else:
+        # Ollama ignores the key, but the OpenAI-compatible endpoint requires one
+        headers["Authorization"] = "Bearer ollama"
+
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        response = await client.post(cfg["base_url"], headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json()
 
 async def call_groq(payload: dict) -> dict:
-    """Groq is OpenAI-compatible, so we just pass the payload."""
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise ValueError("GROQ_API_KEY is not set")
-        
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        response = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json=payload
-        )
-        response.raise_for_status()
-        return response.json()
+    return await _call_openai_compatible("groq", payload)
 
 async def call_gemini(payload: dict) -> dict:
-    """
-    Gemini requires a translation layer. 
-    We assume the input payload is OpenAI format (messages: [{role, content}]).
-    """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY is not set")
-
-    # Translation: OpenAI -> Gemini
-    messages = payload.get("messages", [])
-    # Gemini separates system prompt from contents
-    system_instruction = None
-    contents = []
-    
-    for msg in messages:
-        if msg["role"] == "system":
-            system_instruction = {"parts": [{"text": msg["content"]}]}
-        elif msg["role"] == "user":
-            contents.append({"role": "user", "parts": [{"text": msg["content"]}]})
-        elif msg["role"] == "assistant":
-            contents.append({"role": "model", "parts": [{"text": msg["content"]}]})
-
-    gemini_payload = {"contents": contents}
-    if system_instruction:
-        gemini_payload["system_instruction"] = system_instruction
-
-    # Default to gemini-1.5-flash for zero-cost tier
-    model = payload.get("model", "gemini-1.5-flash")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        response = await client.post(url, json=gemini_payload)
-        response.raise_for_status()
-        data = response.json()
-
-    # Translation: Gemini -> OpenAI (so the gateway always returns OpenAI format)
-    try:
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError):
-        text = "Error: Could not parse Gemini response."
-
-    return {
-        "choices": [{"message": {"role": "assistant", "content": text}}],
-        "usage": {
-            # Gemini provides token counts in usageMetadata
-            "prompt_tokens": data.get("usageMetadata", {}).get("promptTokenCount", 0),
-            "completion_tokens": data.get("usageMetadata", {}).get("candidatesTokenCount", 0),
-            "total_tokens": data.get("usageMetadata", {}).get("totalTokenCount", 0)
-        }
-    }
+    return await _call_openai_compatible("gemini", payload)
 
 async def call_ollama(payload: dict) -> dict:
-    """Ollama is OpenAI-compatible natively."""
-    # Default to a local model if none specified
-    if "model" not in payload:
-        payload["model"] = "llama3.2"
-        
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        response = await client.post(
-            "http://localhost:11434/v1/chat/completions",
-            json=payload
-        )
-        response.raise_for_status()
-        return response.json()
+    return await _call_openai_compatible("ollama", payload)

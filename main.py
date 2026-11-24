@@ -1,4 +1,5 @@
 # main.py
+import os
 import time
 import hashlib
 import json
@@ -11,11 +12,9 @@ import guardrails
 import providers
 
 # ADR-001: In-Memory Stores for v0.1
-# Format: { "hashed_request": {"response": dict, "expires_at": float} }
 CACHE: Dict[str, dict] = {}
 CACHE_TTL_SECONDS = 3600
 
-# Format: { "virtual_key": {"team": str, "tokens_used": int} }
 KEYS: Dict[str, dict] = {
     "test-key-123": {"team": "dev-team", "tokens_used": 0}
 }
@@ -29,13 +28,12 @@ PRICING = {
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warm up Presidio so the first request isn't slow
     guardrails.warm_up()
     yield
 
 app = FastAPI(title="RCGC Gateway v0.1", lifespan=lifespan)
 
-# --- Pydantic Models for Request Validation ---
+# --- Pydantic Models ---
 class Message(BaseModel):
     role: str
     content: str
@@ -54,7 +52,8 @@ def health():
 @app.post("/v1/chat/completions")
 async def chat_completions(
     request: ChatRequest, 
-    authorization: Optional[str] = Header(None)
+    authorization: Optional[str] = Header(None),
+    x_force_provider: Optional[str] = Header(None)  # ADR-008: Testing-only
 ):
     # 1. Auth
     if not authorization or not authorization.startswith("Bearer "):
@@ -72,7 +71,7 @@ async def chat_completions(
     
     payload = {
         "model": request.model,
-        "messages": [m.model_dump() for m in sanitized_messages],  # Pydantic v2 fix
+        "messages": [m.model_dump() for m in sanitized_messages],
         "temperature": request.temperature
     }
 
@@ -93,21 +92,43 @@ async def chat_completions(
     response = None
     provider_used = None
 
+    # ADR-008: Gated testing override
+    force_provider = None
+    if os.getenv("ALLOW_FORCE_PROVIDER", "false").lower() == "true":
+        force_provider = x_force_provider
+
     try:
-        response = await providers.call_groq(payload)
-        provider_used = "groq"
-    except Exception as e:
-        print(f"Groq failed: {e}. Falling back to Gemini.")
-        try:
+        if force_provider == "gemini":
             response = await providers.call_gemini(payload)
             provider_used = "gemini"
-        except Exception as e2:
-            print(f"Gemini failed: {e2}. Falling back to Ollama.")
+        elif force_provider == "ollama":
+            response = await providers.call_ollama(payload)
+            provider_used = "ollama"
+        else:
+            # Default path: Groq first
+            response = await providers.call_groq(payload)
+            provider_used = "groq"
+    except Exception as e:
+        print(f"Primary provider failed: {e}. Falling back...")
+        # Fallback chain (only applies if not forced, or if forced provider failed)
+        if force_provider != "gemini":
             try:
+                response = await providers.call_gemini(payload)
+                provider_used = "gemini"
+            except Exception as e2:
+                print(f"Gemini failed: {e2}. Falling back to Ollama.")
+                try:
+                    response = await providers.call_ollama(payload)
+                    provider_used = "ollama"
+                except Exception as e3:
+                    raise HTTPException(status_code=502, detail="All providers failed")
+        else:
+             # If Gemini was forced and failed, try Ollama as last resort
+             try:
                 response = await providers.call_ollama(payload)
                 provider_used = "ollama"
-            except Exception as e3:
-                raise HTTPException(status_code=502, detail="All providers failed")
+             except Exception:
+                raise HTTPException(status_code=502, detail="Forced Gemini and fallback Ollama failed")
 
     # 5. Cost Tracking
     usage = response.get("usage", {})

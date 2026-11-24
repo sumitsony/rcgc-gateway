@@ -82,3 +82,37 @@ observed during v0.1 setup.
 
 \*\*Tradeoff:\*\* None. Config is portable and committed to repo.
 
+
+
+\## ADR-008: X-Force-Provider Header for Testing
+
+\*\*Decision:\*\* Gateway accepts an `X-Force-Provider` header to bypass the normal Groq-first routing.
+
+\*\*Security Constraint:\*\* The header is ONLY honored if the environment variable `ALLOW\_FORCE\_PROVIDER=true` is set. In production, this env var is unset, and the header is silently ignored.
+
+\*\*Why:\*\* Without it, the smoke test can only verify Groq. Gemini and Ollama would only be tested on failure (unreliable). This allows manual verification of all three providers.
+
+\*\*Tradeoff:\*\* Adds 5 lines of logic to the routing function. Acceptable because it's gated.
+
+
+
+\## ADR-010: Free-Tier Providers Are Unreliable Under Load
+
+\*\*Decision:\*\* Accept 503/502 failures from Gemini free tier as expected behavior.
+
+\*\*Why:\*\* Google's free-tier Gemini API is known to return 503 under load
+
+(confirmed via uvicorn logs: `Server error '503 Service Unavailable'`).
+
+The gateway's fallback chain (Gemini -> Ollama) handles this correctly.
+
+\*\*Tradeoff:\*\* Forced-Gemini smoke tests will occasionally fail with 502
+
+(gateway's generic "all providers failed" response). This is not a bug.
+
+\*\*Mitigation:\*\* Retry after 5–10 minutes, or switch to a less-loaded model using:
+
+
+
+curl -X POST "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" -H "Authorization: Bearer %GEMINI\_API\_KEY%" -H "Content-Type: application/json" -d "{\\"model\\":\\"gemini-3.8-flash\\",\\"messages\\":\[{\\"role\\":\\"user\\",\\"content\\":\\"hi\\"}]}"
+

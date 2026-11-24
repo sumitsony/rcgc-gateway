@@ -82,7 +82,15 @@ We strictly adhere to the four principles:
 
 \- \[x] Initial documentation drafted (README, DECISIONS, PROGRESS).
 
-\- \[ ] \*\*NEXT UP:\*\* Initialize GitHub repo, commit documentation, and write `main.py` + `guardrails.py`.
+\- \[x] \*\*v0.1 COMPLETE:\*\* FastAPI proxy, exact in-memory cache, Presidio PII guardrail, shadow cost ledger, and multi-provider routing (Groq/Gemini/Ollama) implemented.
+
+\- \[x] \*\*Tests:\*\* 8/8 passing (4 functional, 4 red-team). `pytest.ini` added.
+
+\- \[x] \*\*Live Smoke Test:\*\* Groq and Ollama verified live. Gemini verified as reachable but currently returning 503 (documented in ADR-010).
+
+\- \[ ] \*\*NEXT UP (v0.2.1):\*\* Expose `cost\_usd` in `/usage` endpoint (ADR-011).
+
+\- \[ ] \*\*DECISION REQUIRED:\*\* Docker for Redis (v0.2.2) - Yes or No?
 
 
 
@@ -103,6 +111,38 @@ If the user starts a new conversation and asks you to "Read PROGRESS.md", you MU
 5\. Look at the "NEXT UP" item in Section 5 and ask the user if they want to proceed with it, OR if they want to change the plan.
 
 6\. Do NOT write any code until the user explicitly says "Go ahead" or confirms the next step.
+
+
+
+\## ADR-010: Free-Tier Providers Are Unreliable Under Load
+
+\*\*Decision:\*\* Accept 503/502 failures from Gemini free tier as expected behavior.
+
+\*\*Why:\*\* Google's free-tier Gemini API is known to return 503 under load.
+
+Confirmed via uvicorn logs during v0.1 smoke test: 
+
+`Server error '503 Service Unavailable' for url 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'`.
+
+The gateway's fallback chain (Gemini -> Ollama) handles this correctly.
+
+\*\*Tradeoff:\*\* Forced-Gemini smoke tests will occasionally fail with 502
+
+(gateway's generic "all providers failed" response). This is not a bug.
+
+\*\*Mitigation:\*\* Retry after 5–10 minutes, or switch to a less-loaded model.
+
+
+
+\## ADR-011: Cost Observability Deferred to v0.2
+
+\*\*Decision:\*\* The `cost\_usd` calculation exists in `main.py` but is not yet exposed via `/usage`.
+
+\*\*Why:\*\* We focused on verifying the logic of token counting (via red-team tests) first.
+
+\*\*Tradeoff:\*\* The "Shadow Cost" mechanism cannot be visually verified by the user yet.
+
+\*\*Upgrade path:\*\* v0.2.1 will add `cost\_usd` to the in-memory ledger and return it in `/usage`, along with a functional test proving the dollar math.
 
 
 
