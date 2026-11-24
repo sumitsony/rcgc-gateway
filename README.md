@@ -56,3 +56,11 @@ A hands-on, production-grade control plane for LLM applications. Built from scra
 
 \- Run live integration smoke test: `python smoke\_test.py` (requires valid API keys and local Ollama running).
 
+
+
+> \*\*Note:\*\* Python 3.12 is required. spaCy 3.8.2 does not provide pre-compiled
+
+> wheels for Python 3.13 on Windows, causing a source compilation failure. See
+
+> ADR-006 in DECISIONS.md.
+

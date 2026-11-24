@@ -54,3 +54,31 @@
 
 \*\*Tradeoff:\*\* Automated tests do not catch upstream API breaking changes. The smoke test covers this gap.
 
+
+
+\## ADR-006: Python 3.12 Required (spaCy Wheel Availability)
+
+\*\*Decision:\*\* Project requires Python 3.12.x. Documented in README.
+
+\*\*Why:\*\* spaCy 3.8.2 does not ship pre-compiled wheels for Python 3.13 on Windows.
+
+Attempting install on 3.13 causes pip to fall back to source tarball (.tar.gz),
+
+which fails without Visual C++ Build Tools. Verified during v0.1 setup.
+
+\*\*Tradeoff:\*\* Users on 3.13 must install 3.12 alongside. Accepted for v0.1.
+
+
+
+\## ADR-007: pytest.ini with pythonpath
+
+\*\*Decision:\*\* pytest.ini sets `pythonpath = .` and `testpaths = tests`.
+
+\*\*Why:\*\* Test files import `main`, `providers`, `guardrails` from the project root.
+
+Without pythonpath config, pytest fails with ModuleNotFoundError. This was
+
+observed during v0.1 setup.
+
+\*\*Tradeoff:\*\* None. Config is portable and committed to repo.
+
